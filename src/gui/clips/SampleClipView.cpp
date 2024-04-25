@@ -281,6 +281,8 @@ void SampleClipView::paintEvent( QPaintEvent * pe )
 		rect().bottom() - 2 * spacing
 	);
 	
+	// qDebug("%d %d", (int) offset_start, (int) length);
+	
 	const auto& sample = m_clip->m_sample;
 	// const auto waveform = SampleWaveform::Parameters{sample.data(), sample.sampleSize(), sample.amplification(), sample.reversed()};
 	// SampleWaveform::visualize(waveform, p, r);
@@ -289,11 +291,9 @@ void SampleClipView::paintEvent( QPaintEvent * pe )
 	//~ qDebug("ratio %f", ratio);
 		
 	const auto parameters = SampleThumbnailVisualizeParameters{
-		sample.data()[0].size(), 
-		sample.amplification(), 
-		sample.reversed(), 
-		offset_start,
-		length - offset_start
+		.amplification 			= sample.amplification(), 
+		.reversed 				= sample.reversed(),
+		.pixelsTillSampleEnd 	= length - offset_start
 	};
 	
 	
