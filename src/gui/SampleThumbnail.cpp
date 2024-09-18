@@ -59,7 +59,7 @@ bool SampleThumbnail::selectFromGlobalThumbnailMap(const Sample& inputSample)
 		return true;
 	}
 
-	m_thumbnailCache = std::make_shared<ThumbnailCache>();
+	m_thumbnailCache = std::make_shared<SingleCache>();
 	s_sampleThumbnailCacheMap.insert(std::make_pair(name, m_thumbnailCache));
 	return false;
 }
@@ -124,14 +124,14 @@ SampleThumbnail::SampleThumbnail(const Sample& inputSample)
 	const auto firstThumbnailSize = std::max<size_t>(sampleBufferSize / 4, 1);
 
 	const auto firstThumbnail = generate(firstThumbnailSize, buffer, sampleBufferSize);
-	m_thumbnailCache->push_back(firstThumbnail);
+	m_thumbnailCache->thumbnails.push_back(firstThumbnail);
 
 	// Generate the remaining thumbnails using the first one, each one's
 	// size is the size of the previous one divided by the thumbnail size divisor.
 	for (auto thumbnailSize = std::size_t{firstThumbnailSize / thumbnailSizeDivisor}; thumbnailSize >= MinThumbnailSize;
 		 thumbnailSize /= thumbnailSizeDivisor)
 	{
-		const auto& biggerThumbnail = m_thumbnailCache->back();
+		const auto& biggerThumbnail = m_thumbnailCache->thumbnails.back();
 		const auto biggerThumbnailSize = biggerThumbnail.size();
 		auto bitIndex = std::size_t{0};
 
@@ -145,8 +145,10 @@ SampleThumbnail::SampleThumbnail(const Sample& inputSample)
 			++bitIndex;
 		}
 
-		m_thumbnailCache->push_back(thumbnail);
+		m_thumbnailCache->thumbnails.push_back(thumbnail);
 	}
+	
+	prerenderQPixmap();
 }
 
 void SampleThumbnail::draw(QPainter& painter, const SampleThumbnail::Bit& bit, float lineX, int centerY,
@@ -171,7 +173,7 @@ void SampleThumbnail::draw(QPainter& painter, const SampleThumbnail::Bit& bit, f
 	painter.setPen(color);
 }
 
-void SampleThumbnail::visualize(const SampleThumbnail::VisualizeParameters& parameters, QPainter& painter) const
+void SampleThumbnail::drawPixmap(const SampleThumbnail::VisualizeParameters& parameters, QPainter& painter) const
 {
 	const auto& clipRect = parameters.clipRect;
 	const auto& sampRect = parameters.sampRect.isNull() ? clipRect : parameters.sampRect;
@@ -197,9 +199,9 @@ void SampleThumbnail::visualize(const SampleThumbnail::VisualizeParameters& para
 
 	const auto widthSelect = static_cast<std::size_t>(static_cast<float>(width) / sampleViewLength);
 
-	auto thumbnailIt = m_thumbnailCache->end();
+	auto thumbnailIt = m_thumbnailCache->thumbnails.end();
 	const auto thumbnailItStop =
-		m_thumbnailCache->begin() + (parameters.allowHighResolution || m_thumbnailCache->size() == 1 ? 0 : 1);
+		m_thumbnailCache->thumbnails.begin() + (parameters.allowHighResolution || m_thumbnailCache->thumbnails.size() == 1 ? 0 : 1);
 
 	do {
 		thumbnailIt--;
@@ -237,6 +239,78 @@ void SampleThumbnail::visualize(const SampleThumbnail::VisualizeParameters& para
 
 		draw(painter, thumbnailBit, pixelIndex, centerY, scalingFactor, color, rmsColor);
 	}
+}
+
+void SampleThumbnail::prerenderQPixmap()
+{
+	if (m_thumbnailCache == nullptr)
+	{
+		throw std::runtime_error("Nonexistent Thumbnail cache.");
+	}
+
+	for (const auto& width: SampleThumbnail::QPixmapWidths)
+	{
+		QPixmap pixmap = QPixmap(width, SampleThumbnail::QPixmapHeight);
+		pixmap.fill(QColor(0, 0, 0, 0));
+		QPainter p(&pixmap);
+		p.setPen(QColor(192, 192, 192));
+
+		VisualizeParameters param;
+		param.allowHighResolution = true;
+		param.amplification = 1.0;
+		param.reversed = false;
+		param.clipRect = QRect(0, 0, width, SampleThumbnail::QPixmapHeight);
+
+		drawPixmap(param, p);
+		p.end();
+
+		m_thumbnailCache->qpixmaps.push_back(pixmap);
+	}
+}
+
+void SampleThumbnail::visualize(const SampleThumbnail::VisualizeParameters& parameters, QPainter& painter) const
+{
+	const auto& clipRect = parameters.clipRect;
+	const auto& sampRect = parameters.sampRect.isNull() ? clipRect : parameters.sampRect;
+	const auto& viewRect = parameters.viewRect.isNull() ? clipRect : parameters.viewRect;
+
+	const auto width = sampRect.width();
+	const auto height = sampRect.height();
+
+	if (width > SampleThumbnail::QPixmapWidthLimit)
+	{
+		drawPixmap(parameters, painter);
+		return;
+	}
+
+	const auto pixmapIt = 
+		std::find_if(
+			m_thumbnailCache->qpixmaps.begin(), 
+			m_thumbnailCache->qpixmaps.end(),
+			[&](const auto& pixmap) { return pixmap.width() <= width; }
+		);
+
+	if (pixmapIt == m_thumbnailCache->qpixmaps.end())
+	{
+		drawPixmap(parameters, painter);
+		return;
+	}
+
+	const auto& pixamp = *pixmapIt;
+	const auto pixmapWidth = pixamp.width();
+	const auto pixmapHeight = pixamp.height();
+
+	const auto widthRatio = static_cast<float>(width) / pixmapWidth * (parameters.reversed ? -1.0 : 1.0);
+	const auto heightRatio = static_cast<float>(height) / pixmapHeight;
+
+	auto copyRect = sampRect;
+	copyRect.setHeight(SampleThumbnail::QPixmapHeight);
+	const auto toDraw = 
+		pixamp
+		.copy(copyRect)
+		.transformed(QTransform().scale(widthRatio, heightRatio))
+	;
+	painter.drawPixmap(sampRect, toDraw, sampRect);
 }
 
 } // namespace lmms

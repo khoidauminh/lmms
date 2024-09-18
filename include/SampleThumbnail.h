@@ -25,8 +25,12 @@
 #ifndef LMMS_SAMPLE_THUMBNAIL_H
 #define LMMS_SAMPLE_THUMBNAIL_H
 
+#include <QColor>
 #include <QPainter>
+#include <QPixmap>
 #include <QRect>
+#include <QTransform>
+#include <QDebug>
 #include <memory>
 
 #include "lmms_export.h"
@@ -48,6 +52,9 @@ class LMMS_EXPORT SampleThumbnail
 public:
 	static constexpr auto MinThumbnailSize = 1;
 	static constexpr auto MaxThumbnailSize = 32768;
+	static constexpr auto QPixmapWidths = {2048, 1024, 512, 256};
+	static constexpr auto QPixmapWidthLimit = 4096;
+	static constexpr auto QPixmapHeight = 48;
 
 	struct Bit
 	{
@@ -83,12 +90,17 @@ public:
 
 	using Thumbnail = std::vector<Bit>;
 	using ThumbnailCache = std::vector<Thumbnail>;
+	using QPixmapSet = std::vector<QPixmap>;
+
+	struct SingleCache {
+		ThumbnailCache thumbnails;
+		QPixmapSet qpixmaps;
+	};
 
 	SampleThumbnail() = default;
 	SampleThumbnail(const Sample& sample);
 
 	void visualize(const VisualizeParameters& parameters, QPainter& painter) const;
-	void visualizeOriginal(const VisualizeParameters& parameters, QPainter& painter) const;
 
 	bool selectFromGlobalThumbnailMap(const Sample&);
 	static void cleanUpGlobalThumbnailMap();
@@ -97,12 +109,16 @@ private:
 	static void draw(QPainter& painter, const Bit& bit, float lineX, int centerY, float scalingFactor,
 		const QColor& color, const QColor& rmsColor);
 
+	void drawPixmap(const VisualizeParameters& parameters, QPainter& painter) const;
+	void prerenderQPixmap();
+
+
 	static Thumbnail generate(const size_t thumbnailSize, const SampleFrame* buffer, const size_t size);
 
-	std::shared_ptr<ThumbnailCache> m_thumbnailCache = nullptr;
+	std::shared_ptr<SingleCache> m_thumbnailCache = nullptr;
 
 	/* DEPRECATED; functionality is kept for testing conveniences */
-	inline static std::map<const QString, std::shared_ptr<ThumbnailCache>> s_sampleThumbnailCacheMap;
+	inline static std::map<const QString, std::shared_ptr<SingleCache>> s_sampleThumbnailCacheMap;
 };
 
 } // namespace lmms
